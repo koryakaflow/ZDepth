@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# EffectCraft starts this with `--effectcraft-helper`. It runs ZDepth from its own Python
+# environment, which `--setup [Small|Base|Large ...]` creates (needs `uv`, or python3 with
+# venv + pip) and fills with the models named (default Small).
+# ZDEPTH_TORCH_BACKEND picks the PyTorch build for uv (auto, cpu, cu128, rocm6.4, ...).
+#
+# The helper never installs anything itself: EffectCraft waits for helpers before it opens its
+# window, so a multi-gigabyte install there would look like EffectCraft not starting.
+set -euo pipefail
+
+SRC="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
+DATA="${ZDEPTH_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/zdepth}"
+VENV="$DATA/venv"
+STAMP="$VENV/.requirements"
+
+BACKEND="${ZDEPTH_TORCH_BACKEND:-auto}"
+WANT="$(cat "$SRC/requirements.txt"; echo "torch-backend=$BACKEND")"
+
+ready() {
+    [[ -x "$VENV/bin/python" ]] && [[ "$(cat "$STAMP" 2>/dev/null)" == "$WANT" ]]
+}
+
+# One setup at a time. mkdir is atomic everywhere (macOS has no flock); a lock whose owner is
+# gone is taken over.
+LOCK="$DATA/setup.lock.d"
+lock() {
+    local said=""
+    until mkdir "$LOCK" 2>/dev/null; do
+        local pid
+        pid="$(cat "$LOCK/pid" 2>/dev/null || true)"
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            rm -rf "$LOCK"
+            continue
+        fi
+        [[ -n "$said" ]] || { echo "zdepth: another setup is running; waiting for it" >&2; said=1; }
+        sleep 2
+    done
+    echo $$ > "$LOCK/pid"
+    trap 'rm -rf "$LOCK"' EXIT
+}
+unlock() {
+    rm -rf "$LOCK"
+    trap - EXIT
+}
+
+install() {
+    mkdir -p "$DATA"
+    lock
+    if ready; then
+        unlock
+        return 0
+    fi
+    echo "zdepth: setting up $VENV (PyTorch is a few GB, this takes a while)" >&2
+    # An existing environment is updated in place: a running helper may be using it.
+    if command -v uv >/dev/null; then
+        [[ -x "$VENV/bin/python" ]] || uv venv --quiet --python 3.12 "$VENV" >&2
+        uv pip install --python "$VENV/bin/python" --torch-backend "$BACKEND" -r "$SRC/requirements.txt" >&2
+    else
+        [[ -x "$VENV/bin/python" ]] || python3 -m venv "$VENV" >&2
+        "$VENV/bin/pip" install -r "$SRC/requirements.txt" >&2
+    fi
+    printf '%s' "$WANT" > "$STAMP"
+    unlock
+}
+
+if [[ "${1:-}" == "--setup" ]]; then
+    install
+elif ! ready; then
+    echo "zdepth: not set up yet. Run in a terminal: $SRC/effectcraft-helper-zdepth --setup" >&2
+    exit 1
+fi
+
+# -I: ignore PYTHON* variables and the user's site-packages; the source folder is added by hand.
+exec "$VENV/bin/python" -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from zdepth.helper import main; sys.exit(main())' "$SRC" "$@"

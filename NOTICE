@@ -1,0 +1,14 @@
+ZDepth
+Copyright 2026 koryakaflow
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software from Video Depth Anything
+(https://github.com/DepthAnything/Video-Depth-Anything), Copyright (2025) Bytedance Ltd.
+and/or its affiliates, licensed under the Apache License, Version 2.0, in
+zdepth/vendor/video_depth_anything (modified; see the README there).
+
+Model weights are not part of ZDepth: `effectcraft-helper-zdepth --setup` downloads them from
+their authors' Hugging Face repositories under their own licenses. Depth Anything V2 Small and
+Video Depth Anything Small are Apache-2.0; Depth Anything V2 Base and Large and Video Depth
+Anything Large are CC-BY-NC-4.0 (non-commercial use only).
